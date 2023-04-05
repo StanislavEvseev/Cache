@@ -16,30 +16,40 @@ type Cacher interface {
 	Set(string, string)
 }
 
+type CacheElem struct {
+	value  string
+	expire time.Time
+}
+
 type Cache struct {
 	mu     sync.RWMutex
 	ttl    time.Duration
 	size   int
-	values map[string]string
+	values map[string]CacheElem
 }
 
 // NewCache инициализирует кэш
 func NewCache(ttl time.Duration, Size int) *Cache {
 	var c Cache
-	c.ttl = ttl                        //время жизни
-	c.values = make(map[string]string) //здесь будут значения
-	c.size = Size                      //предельный размер
+	c.ttl = ttl                           //время жизни
+	c.values = make(map[string]CacheElem) //здесь будут значения
+	c.size = Size                         //предельный размер
 	return &c
 }
 
-// Set заносит элемент в кэш. Если кэш переполнен, при этом его данные предварительно очищаются
+// Set заносит элемент в кэш. Если кэш переполнен, перед этим его данные предварительно очищаются
 func (c *Cache) Set(Key string, Value string) {
+	var elem CacheElem
 	if len(c.values) == c.size {
-		c.Purge()                      //кэш очищается при переполнении
-		time.AfterFunc(c.ttl, c.Purge) //кэш также очищается через заданное время независимо от наполнения
+		c.PurgeAll() //кэш очищается при переполнении
 	}
+	c.PurgeExpired()
 	c.mu.Lock()
-	c.values[Key] = Value
+	elem.value = Value
+	expire := time.Now()       //берём время добавления элемента (текущее)
+	expire = expire.Add(c.ttl) //прибавляем время жизни, заданное в конструкторе
+	elem.expire = expire       //записываем срок годности элемента
+	c.values[Key] = elem
 	defer c.mu.Unlock()
 }
 
@@ -47,12 +57,13 @@ func (c *Cache) Set(Key string, Value string) {
 func (c *Cache) Get(Key string) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	Value, Exist := c.values[Key]
+	k, Exist := c.values[Key]
+	Value := k.value
 	return Value, Exist
 }
 
-// Очищает данные кэша
-func (c *Cache) Purge() {
+// Очищает данные кэша полностью
+func (c *Cache) PurgeAll() {
 	c.mu.Lock()
 	for k := range c.values {
 		delete(c.values, k)
@@ -60,16 +71,38 @@ func (c *Cache) Purge() {
 	defer c.mu.Unlock()
 }
 
+// Очищает данные кэша от старых значений
+func (c *Cache) PurgeExpired() {
+	c.mu.Lock()
+	checktime := time.Now()
+	for k := range c.values {
+		e := c.values[k]
+		t := e.expire
+		fmt.Println(t)
+		if t.Before(checktime) {
+			delete(c.values, k)
+		}
+	}
+	defer c.mu.Unlock()
+}
+
 func main() { //Проверяет работу кэша
-	MyCache := NewCache(time.Duration(3*time.Second), 3) //время жизни - 3 секунды, размер - 3 значения. Можно задать любые.
+	MyCache := NewCache(time.Duration(10*time.Second), 20) //время жизни - 10 секунды, размер - 20 значений. Можно задать любые.
 	MyCache.Set("A", "1")
 	fmt.Println(MyCache.values)
+	time.Sleep(3 * time.Second)
 	MyCache.Set("B", "2")
 	fmt.Println(MyCache.values)
+	time.Sleep(3 * time.Second)
 	MyCache.Set("C", "3")
 	fmt.Println(MyCache.values)
-	MyCache.Set("D", "4") //здесь кэш должен очиститься по переполнению
+	time.Sleep(3 * time.Second)
+	MyCache.Set("D", "4")
 	fmt.Println(MyCache.values)
-	time.Sleep(4 * time.Second) //здесь кэш должен очиститься по таймеру
+	time.Sleep(3 * time.Second)
+	MyCache.Set("E", "5")
+	fmt.Println(MyCache.values)
+	time.Sleep(3 * time.Second)
+	MyCache.Set("F", "6")
 	fmt.Println(MyCache.values)
 }
