@@ -34,6 +34,7 @@ func NewCache(ttl time.Duration, Size int) *Cache {
 	c.ttl = ttl                           //время жизни
 	c.values = make(map[string]CacheElem) //здесь будут значения
 	c.size = Size                         //предельный размер
+	go c.cleaner()                        //запускает процесс периодической уборки старых значений с периодом, равным заданному времени жизни элемента
 	return &c
 }
 
@@ -43,7 +44,7 @@ func (c *Cache) Set(Key string, Value string) {
 	if len(c.values) == c.size {
 		c.PurgeAll() //кэш очищается при переполнении
 	}
-	c.PurgeExpired()
+	//c.PurgeExpired()
 	c.mu.Lock()
 	elem.value = Value
 	expire := time.Now()       //берём время добавления элемента (текущее)
@@ -86,8 +87,15 @@ func (c *Cache) PurgeExpired() {
 	defer c.mu.Unlock()
 }
 
+func (c *Cache) cleaner() { //периодически чистит кэш от старых элементов, период берётся из параметров кэша
+	for {
+		time.Sleep(c.ttl)
+		c.PurgeExpired()
+	}
+}
+
 func main() { //Проверяет работу кэша
-	MyCache := NewCache(time.Duration(10*time.Second), 20) //время жизни - 10 секунды, размер - 20 значений. Можно задать любые.
+	MyCache := NewCache(time.Duration(6*time.Second), 20) //время жизни - 10 секунды, размер - 20 значений. Можно задать любые.
 	MyCache.Set("A", "1")
 	fmt.Println(MyCache.values)
 	time.Sleep(3 * time.Second)
